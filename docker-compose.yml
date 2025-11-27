@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  escl-scanner-api:
+    image: fizzers123/python-escl-paperless-auto-scanner
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - SCANNER_IP=printer.local
+      - PAPERLESS_URL=http://paperless:8000
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
+      - API_PORT=5050
+      - API_HOST=0.0.0.0
+    networks:
+      - scanner-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5050/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  scanner-net:
+    driver: bridge
