@@ -1,4 +1,4 @@
-# eSCL Scanner API for Home Assistant
+# eSCL auto scanner for paperless
 
 A lightweight REST API that enables scanning from eSCL-compatible printers (HP, Brother, Canon, etc.) to Paperless-ngx, with Home Assistant integration and automatic scanning capabilities.
 
@@ -16,20 +16,12 @@ A lightweight REST API that enables scanning from eSCL-compatible printers (HP, 
 
 ### Using Docker (Recommended)
 
-1. **Clone and configure:**
-   ```bash
-   git clone <your-repo-url>
-   cd escl-scanner-api
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
-
-2. **Run with docker-compose:**
+1. **Run with docker-compose:**
    ```bash
    docker-compose up -d
    ```
 
-3. **Test the API:**
+2. **Test the API:**
    ```bash
    curl http://localhost:5050/scan
    ```
@@ -81,15 +73,10 @@ Trigger a scan with optional parameters.
 
 **GET Example:**
 ```bash
+curl "http://localhost:5050/scan
 curl "http://localhost:5050/scan?color_mode=RGB24&resolution=300&title=Invoice"
 ```
 
-**POST Example:**
-```bash
-curl -X POST http://localhost:5050/scan \
-  -H "Content-Type: application/json" \
-  -d '{"color_mode": "Grayscale8", "resolution": 600, "title": "Document"}'
-```
 
 **Parameters:**
 - `color_mode`: `RGB24` (default), `Grayscale8`, or `BlackAndWhite1`
@@ -100,7 +87,7 @@ curl -X POST http://localhost:5050/scan \
 ### Auto-scan Mode
 
 **GET** `/autoscan/enable`  
-Enable automatic scanning when document detected in ADF
+Enable automatic scanning when document detected in ADF (Automatic Document Feeder)
 
 **GET** `/autoscan/disable`  
 Disable automatic scanning
@@ -124,7 +111,7 @@ Check if the API is running.
 curl http://localhost:5050/health
 ```
 
-## Home Assistant Integration
+## Home Assistant Integration (Optional) (for fun)
 
 ### 1. Add REST Commands
 
@@ -136,12 +123,6 @@ rest_command:
     url: "http://YOUR_SERVER_IP:5050/scan"
     method: GET
   
-  scan_color:
-    url: "http://YOUR_SERVER_IP:5050/scan"
-    method: POST
-    content_type: "application/json"
-    payload: '{"color_mode": "RGB24", "resolution": 300}'
-  
   autoscan_enable:
     url: "http://YOUR_SERVER_IP:5050/autoscan/enable"
     method: GET
@@ -150,12 +131,34 @@ rest_command:
     url: "http://YOUR_SERVER_IP:5050/autoscan/disable"
     method: GET
 
-sensor:
+# Binary sensor to track auto-scan status
+binary_sensor:
   - platform: rest
-    name: "Scanner Auto-scan Status"
+    name: "Scanner Auto-scan"
+    unique_id: scanner_autoscan_status
     resource: "http://YOUR_SERVER_IP:5050/autoscan/status"
     value_template: "{{ value_json.enabled }}"
-    scan_interval: 30
+    device_class: running
+    scan_interval: 10
+
+# Template switch to control auto-scan with on/off toggle
+switch:
+  - platform: template
+    switches:
+      scanner_autoscan:
+        friendly_name: "Scanner Auto-Scan"
+        unique_id: scanner_autoscan_switch
+        value_template: "{{ is_state('binary_sensor.scanner_auto_scan', 'on') }}"
+        turn_on:
+          service: rest_command.autoscan_enable
+        turn_off:
+          service: rest_command.autoscan_disable
+        icon_template: >-
+          {% if is_state('binary_sensor.scanner_auto_scan', 'on') %}
+            mdi:autorenew
+          {% else %}
+            mdi:pause
+          {% endif %}
 
 script:
   scan_now:
@@ -167,37 +170,9 @@ script:
         data:
           title: "Scanner"
           message: "Scan started"
-  
-  autoscan_enable:
-    alias: "Enable Auto-Scan"
-    icon: mdi:autorenew
-    sequence:
-      - service: rest_command.autoscan_enable
 ```
 
-### 2. Add Dashboard Card
-
-```yaml
-type: vertical-stack
-cards:
-  - type: horizontal-stack
-    cards:
-      - type: button
-        name: Scan Now
-        icon: mdi:scanner
-        tap_action:
-          action: call-service
-          service: script.scan_now
-      - type: button
-        name: Auto-Scan
-        icon: mdi:autorenew
-        tap_action:
-          action: call-service
-          service: script.autoscan_enable
-  - type: entity
-    entity: sensor.scanner_auto_scan_status
-    name: Auto-Scan Status
-```
+The switch will show the current auto-scan status and allow you to toggle it on/off directly from the UI.
 
 ## Docker Deployment
 
@@ -205,16 +180,16 @@ cards:
 
 ```bash
 # Build the image
-docker build -t escl-scanner-api .
+docker build -t python-escl-paperless-auto-scanner .
 
 # Run with environment variables
 docker run -d \
-  --name escl-scanner-api \
+  --name python-escl-paperless-auto-scanner \
   -p 5050:5050 \
   -e SCANNER_IP=printer.local \
   -e PAPERLESS_URL=http://paperless:8000 \
   -e PAPERLESS_TOKEN=your_token_here \
-  escl-scanner-api
+  python-escl-paperless-auto-scanner
 ```
 
 ### Using docker-compose
@@ -230,75 +205,6 @@ docker-compose logs -f
 docker-compose down
 ```
 
-## Systemd Service (Alternative)
-
-If not using Docker, run as a systemd service:
-
-1. **Create service file** `/etc/systemd/system/escl-scanner-api.service`:
-
-```ini
-[Unit]
-Description=eSCL Scanner API
-After=network.target
-
-[Service]
-Type=simple
-User=your_user
-WorkingDirectory=/path/to/escl-scanner-api
-Environment="SCANNER_IP=printer.local"
-Environment="PAPERLESS_URL=http://localhost:8000"
-Environment="PAPERLESS_TOKEN=your_token"
-ExecStart=/usr/bin/python3 /path/to/escl-scanner-api/scan_api.py
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-2. **Enable and start:**
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable escl-scanner-api
-sudo systemctl start escl-scanner-api
-sudo systemctl status escl-scanner-api
-```
-
-## Compatible Printers
-
-This API works with any printer supporting the eSCL (AirPrint) protocol:
-
-- HP (most modern models)
-- Brother
-- Canon
-- Epson
-- Xerox
-- And many others with AirPrint support
-
-## Troubleshooting
-
-### Can't connect to scanner
-
-```bash
-# Test scanner connectivity
-curl http://SCANNER_IP/eSCL/ScannerCapabilities
-
-# Check if scanner supports eSCL
-nmap -p 80,443,8080,8443 SCANNER_IP
-```
-
-### Auto-scan not working
-
-1. Check scanner status: `curl http://localhost:5050/autoscan/status`
-2. Verify ADF support: Check scanner capabilities
-3. Review logs: `docker-compose logs -f` or `journalctl -u escl-scanner-api -f`
-
-### Paperless upload fails
-
-1. Verify Paperless URL is accessible from the API
-2. Check API token is valid
-3. Ensure Paperless accepts the token (test with curl)
 
 ## Development
 

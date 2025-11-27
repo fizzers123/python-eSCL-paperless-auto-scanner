@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL maintainer="Your Name"
+LABEL maintainer="fizzers123"
 LABEL description="eSCL Scanner API for Home Assistant - Scan documents from eSCL printers to Paperless-ngx"
 
 # Set working directory

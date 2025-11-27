@@ -2,8 +2,7 @@ version: '3.8'
 
 services:
   escl-scanner-api:
-    build: .
-    container_name: escl-scanner-api
+    image: fizzers123/python-escl-paperless-auto-scanner
     restart: unless-stopped
     ports:
       - "5050:5050"

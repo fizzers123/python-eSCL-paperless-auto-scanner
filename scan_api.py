@@ -323,13 +323,15 @@ def health():
 if __name__ == "__main__":
     # Validate configuration
     if not PAPERLESS_TOKEN:
-        print("WARNING: PAPERLESS_TOKEN not set. Please configure environment variables.")
-    
+        print(
+            "WARNING: PAPERLESS_TOKEN not set. Please configure environment variables."
+        )
+
     print(f"Starting eSCL Scanner API")
     print(f"Scanner IP: {SCANNER_IP}")
     print(f"Paperless URL: {PAPERLESS_URL}")
     print(f"API listening on: {API_HOST}:{API_PORT}")
-    
+
     # Start auto-scan background worker
     autoscan_worker()
 
