@@ -8,8 +8,10 @@ from flask import Flask, request, jsonify
 import requests
 import time
 import os
+from dotenv import load_dotenv
 from datetime import datetime
 
+load_dotenv()
 app = Flask(__name__)
 
 # Configuration from environment variables
@@ -28,12 +30,14 @@ class ESCLScanner:
 
     def __init__(self, scanner_ip):
         self.scanner_ip = scanner_ip
-        self.base_url = f"http://{scanner_ip}/eSCL"
+        protocol = os.getenv("SCANNER_PROTOCOL", "https")
+        self.verify_tls = os.getenv("SCANNER_VERIFY_TLS", "false").lower() in ("1", "true", "yes")
+        self.base_url = f"{protocol}://{scanner_ip}/eSCL"
 
     def get_scanner_status(self):
         """Get scanner status"""
         try:
-            response = requests.get(f"{self.base_url}/ScannerStatus", timeout=10)
+            response = requests.get(f"{self.base_url}/ScannerStatus", timeout=10, verify=self.verify_tls)
             response.raise_for_status()
             return response.text
         except:
@@ -42,7 +46,7 @@ class ESCLScanner:
     def get_scanner_capabilities(self):
         """Get scanner capabilities and check for ADF"""
         try:
-            response = requests.get(f"{self.base_url}/ScannerCapabilities", timeout=10)
+            response = requests.get(f"{self.base_url}/ScannerCapabilities", timeout=10, verify=self.verify_tls)
             response.raise_for_status()
 
             # Check if ADF is mentioned in capabilities
@@ -67,23 +71,32 @@ class ESCLScanner:
     def create_scan_job(self, settings):
         """Create a scan job with specified settings"""
         scan_settings_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" 
-                   xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
-    <pwg:Version>2.0</pwg:Version>
+<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">
+    <pwg:Version>2.9</pwg:Version>
     <scan:Intent>{settings.get('intent', 'Document')}</scan:Intent>
-    <pwg:ScanRegions>
-        <pwg:ScanRegion>
-            <pwg:XOffset>0</pwg:XOffset>
-            <pwg:YOffset>0</pwg:YOffset>
-            <pwg:Width>{settings.get('width', 2550)}</pwg:Width>
-            <pwg:Height>{settings.get('height', 3300)}</pwg:Height>
-        </pwg:ScanRegion>
-    </pwg:ScanRegions>
-    <pwg:InputSource>{settings.get('input_source', 'Platen')}</pwg:InputSource>
+    <pwg:InputSource>{settings.get('input_source', 'Feeder')}</pwg:InputSource>
     <scan:DocumentFormatExt>{settings.get('format', 'application/pdf')}</scan:DocumentFormatExt>
     <scan:XResolution>{settings.get('resolution', 300)}</scan:XResolution>
     <scan:YResolution>{settings.get('resolution', 300)}</scan:YResolution>
+    <scan:Brightness>{settings.get('brightness', 4)}</scan:Brightness>
+    <scan:Contrast>{settings.get('contrast', 4)}</scan:Contrast>
+    <scan:Duplex>{str(settings.get('duplex', False)).lower()}</scan:Duplex>
     <scan:ColorMode>{settings.get('color_mode', 'RGB24')}</scan:ColorMode>
+    <scan:JobSourceInfo>
+        <scan:UserName>{settings.get('user_name', 'admin')}</scan:UserName>
+        <scan:MachineName>{settings.get('machine_name', 'printer')}</scan:MachineName>
+        <scan:Application>{settings.get('application_name', 'EWS-WebScan')}</scan:Application>
+    </scan:JobSourceInfo>
+    <scan:CompressionFactor>{settings.get('compression_factor', 25)}</scan:CompressionFactor>
+    <pwg:ScanRegions>
+        <pwg:ScanRegion>
+            <pwg:Height>{settings.get('height', 3507)}</pwg:Height>
+            <pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits>
+            <pwg:Width>{settings.get('width', 2481)}</pwg:Width>
+            <pwg:XOffset>0</pwg:XOffset>
+            <pwg:YOffset>0</pwg:YOffset>
+        </pwg:ScanRegion>
+    </pwg:ScanRegions>
 </scan:ScanSettings>"""
 
         try:
@@ -93,6 +106,7 @@ class ESCLScanner:
                 data=scan_settings_xml,
                 headers=headers,
                 timeout=10,
+                verify=self.verify_tls,
             )
             response.raise_for_status()
 
@@ -111,7 +125,7 @@ class ESCLScanner:
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(doc_url, timeout=60)
+                response = requests.get(doc_url, timeout=60, verify=self.verify_tls)
                 response.raise_for_status()
                 return response.content
             except requests.exceptions.HTTPError as e:
@@ -175,18 +189,25 @@ def perform_scan(resolution=300, color_mode="RGB24", source=None, title=None):
     # Auto-detect ADF if source not specified
     if source is None:
         has_adf = scanner.get_scanner_capabilities()
-        source = "Adf" if has_adf else "Platen"
+        source = "Feeder" if has_adf else "Platen"
         app.logger.info(f"Auto-detected source: {source}")
 
     # Prepare scan settings
     scan_settings = {
         "resolution": resolution,
         "color_mode": color_mode,
-        "input_source": source,
+        "input_source": source or "Feeder",
         "format": "application/pdf",
         "intent": "Document",
-        "width": 2550,
-        "height": 3300,
+        "width": 2481,
+        "height": 3507,
+        "brightness": 4,
+        "contrast": 4,
+        "duplex": False,
+        "user_name": os.getenv("SCAN_USER", "admin"),
+        "machine_name": os.getenv("SCAN_MACHINE", "printer"),
+        "application_name": os.getenv("SCAN_APP", "EWS-WebScan"),
+        "compression_factor": int(os.getenv("SCAN_COMPRESSION", "25")),
     }
 
     # Create scan job
@@ -301,7 +322,7 @@ def autoscan_worker():
                                 "Document detected in ADF, auto-scanning..."
                             )
                             result = perform_scan(
-                                resolution=300, color_mode="RGB24", source="Adf"
+                                resolution=300, color_mode="RGB24", source="Feeder"
                             )
                             app.logger.info(
                                 f"Auto-scan completed: {result['filename']}"
