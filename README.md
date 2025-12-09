@@ -49,13 +49,19 @@ A lightweight REST API that enables scanning from eSCL-compatible printers (HP, 
 
 Set these environment variables in `.env` or docker-compose.yml:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SCANNER_IP` | IP address or hostname of your eSCL scanner | `printer.local` |
-| `PAPERLESS_URL` | URL of your Paperless-ngx instance | `http://localhost:8000` |
-| `PAPERLESS_TOKEN` | API token from Paperless-ngx | (required) |
-| `API_PORT` | Port for the API server | `5050` |
-| `API_HOST` | Host to bind the API server | `0.0.0.0` |
+| Variable | Required | Description | Default |
+|----------| ---------|-------------|---------|
+| `SCANNER_IP` | required | IP address or hostname of your eSCL scanner | `printer.local` |
+| `SCANNER_PROTOCOL` | | `http` or `https` for eSCL endpoint | `https` |
+| `SCANNER_VERIFY_TLS` | | Verify TLS certs (`true`/`false`) | `false` |
+| `PAPERLESS_URL` |  required | URL of your Paperless-ngx instance | `http://localhost:8000` |
+| `PAPERLESS_TOKEN` |  required | API token from Paperless-ngx | (required) |
+| `API_PORT` | | Port for the API server | `5050` |
+| `API_HOST` | | Host to bind the API server | `0.0.0.0` |
+| `SCAN_USER` | | JobSourceInfo: user name sent to scanner | `admin` |
+| `SCAN_MACHINE` | | JobSourceInfo: machine name | `printer` |
+| `SCAN_APP` | | JobSourceInfo: application name | `EWS-WebScan` |
+| `SCAN_COMPRESSION` | | Compression factor in XML | `25` |
 
 ### Getting Paperless API Token
 
@@ -81,7 +87,7 @@ curl "http://localhost:5050/scan?color_mode=RGB24&resolution=300&title=Invoice"
 **Parameters:**
 - `color_mode`: `RGB24` (default), `Grayscale8`, or `BlackAndWhite1`
 - `resolution`: DPI (default: 300)
-- `source`: `Platen`, `Adf`, or auto-detect if not specified
+- `source`: `Platen` or `Feeder` (ADF). If omitted, auto-detects and prefers `Feeder` when available.
 - `title`: Document title in Paperless (optional)
 
 ### Auto-scan Mode
@@ -187,6 +193,8 @@ docker run -d \
   --name python-escl-paperless-auto-scanner \
   -p 5050:5050 \
   -e SCANNER_IP=printer.local \
+  -e SCANNER_PROTOCOL=https \
+  -e SCANNER_VERIFY_TLS=false \
   -e PAPERLESS_URL=http://paperless:8000 \
   -e PAPERLESS_TOKEN=your_token_here \
   python-escl-paperless-auto-scanner
@@ -218,7 +226,13 @@ python scan_api.py
 
 # Test endpoints
 curl http://localhost:5050/health
-curl http://localhost:5050/scan
+curl "http://localhost:5050/scan?source=Feeder&resolution=300&color_mode=RGB24"
+
+## Troubleshooting
+
+- 409 Conflict from `/eSCL/ScanJobs`: Ensure the XML matches your device’s expectations. This project defaults to the HP Web UI-compatible payload (Brightness/Contrast/Duplex, JobSourceInfo, CompressionFactor, and `ContentRegionUnits=escl:ThreeHundredthsOfInches`). Also verify `source=Feeder` for ADF.
+- TLS errors to `https://<printer>/eSCL`: Set `SCANNER_VERIFY_TLS=false` (equivalent to curl `--insecure`) or provide proper CA certs and set `SCANNER_VERIFY_TLS=true`.
+- Paperless upload failures: Confirm `PAPERLESS_TOKEN` and `PAPERLESS_URL` are correct, and that Paperless is reachable from the container.
 ```
 
 ## Contributing
